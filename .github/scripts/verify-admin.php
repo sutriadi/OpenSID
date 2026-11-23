@@ -3,9 +3,14 @@
 // Dijalankan DI DALAM container web:  docker compose exec -T web php < .github/scripts/verify-admin.php
 // Memastikan password admin bawaan "sid304" sudah diganti dan password dari OPENSID_ADMIN_PASSWORD berlaku.
 $expected = getenv('EXPECT_ADMIN_PASSWORD') ?: '';
-$db       = [];
-include '/var/www/html/desa/config/database.php';
-$c = $db['default'];
+// Kredensial dari environment container (OpenSID mengenkripsi password di desa/config/database.php setelah migrasi pertama)
+$c = [
+    'hostname' => getenv('OPENSID_DB_HOST') ?: 'db',
+    'username' => getenv('OPENSID_DB_USER') ?: 'opensid',
+    'password' => (string) getenv('OPENSID_DB_PASSWORD'),
+    'database' => getenv('OPENSID_DB_NAME') ?: 'opensid',
+    'port'     => getenv('OPENSID_DB_PORT') ?: 3306,
+];
 mysqli_report(MYSQLI_REPORT_OFF);
 $l = mysqli_init();
 $l->options(MYSQLI_OPT_CONNECT_TIMEOUT, 5);

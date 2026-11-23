@@ -39,7 +39,7 @@ Setiap variabel `OPENSID_*` juga bisa diberikan sebagai `OPENSID_*_FILE` (path b
 | `OPENSID_ENCRYPTION_KEY` | acak | Kunci tanda-tangan tautan verifikasi; dibuat acak dan dipertahankan di `desa/config/config.php`. |
 | `CI_ENV` | `production` | `production` \| `testing` \| `development` (jangan `development` di produksi). |
 
-`desa/config/database.php` selalu ditulis ulang dari `OPENSID_DB_*` saat start. `desa/config/config.php` ditulis ulang hanya selama masih memuat penanda `OPENSID-DOCKER-GENERATED`;
+`desa/config/database.php` selalu ditulis ulang dari `OPENSID_DB_*` saat start (OpenSID sendiri akan mengenkripsi password di berkas itu setelah migrasi, memakai `desa/app_key`). `desa/config/config.php` ditulis ulang hanya selama masih memuat penanda `OPENSID-DOCKER-GENERATED`;
 hapus baris penanda itu bila ingin mengeditnya sendiri (tidak akan ditimpa lagi).
 
 ## Direktori yang bisa di-mount untuk data
@@ -73,7 +73,7 @@ Berguna bila ingin memisahkan penyimpanan (mis. unggahan di disk besar, konfigur
 | `desa/arsip` | Arsip surat/dokumen | Tidak disajikan langsung lewat web |
 | `desa/logo`, `desa/pengaturan`, `desa/anjungan` | Logo, latar login, ikon anjungan | Kecil, aman di volume utama |
 | `desa/themes`, `desa/widgets`, `desa/template-surat` | Tema, widget, template surat ubahan desa | Bisa dibuat read-only bila tidak ada perubahan lewat admin |
-| `desa/config` | `database.php`, `config.php` | Bisa dibuat **read-only** setelah first-run (*belum diuji; aplikasi dapat menulis ulang berkas ini dari menu pengaturan tertentu*) |
+| `desa/config` | `database.php`, `config.php` | Jangan dibuat read-only: OpenSID menulis ulang `database.php` (mengenkripsi password DB setelah migrasi) |
 | `desa/cache` | Cache CodeIgniter | Boleh tmpfs |
 
 Contoh `docker run` tanpa compose:

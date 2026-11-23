@@ -68,13 +68,25 @@ function trigger_host(): string
     return 'localhost';
 }
 
-// --- Koneksi DB dari desa/config/database.php ------------------------------------------------------------
-$db = [];
-include '/var/www/html/desa/config/database.php';
-$c = $db['default'] ?? null;
-if (! $c) {
-    say('first-run: konfigurasi database tidak ditemukan.');
-    exit(0);
+// --- Koneksi DB -----------------------------------------------------------------------------------------------
+// Dari OPENSID_DB_* bila diberikan. Jika tidak, dari desa/config/database.php (OpenSID menyimpan password di sana dalam
+// bentuk terenkripsi setelah migrasi pertama; konfigurasi seperti itu tidak bisa dibaca di sini, jadi first-run dilewati).
+if (env('OPENSID_DB_HOST') !== null) {
+    $c = [
+        'hostname' => env('OPENSID_DB_HOST'),
+        'username' => env('OPENSID_DB_USER') ?? 'opensid',
+        'password' => env('OPENSID_DB_PASSWORD') ?? '',
+        'database' => env('OPENSID_DB_NAME') ?? 'opensid',
+        'port'     => env('OPENSID_DB_PORT') ?? 3306,
+    ];
+} else {
+    $db = [];
+    include '/var/www/html/desa/config/database.php';
+    $c = $db['default'] ?? null;
+    if (! $c || strlen((string) ($c['password'] ?? '')) > 80) {
+        say('first-run dilewati: kredensial database tidak tersedia di environment (OPENSID_DB_*).');
+        exit(0);
+    }
 }
 
 mysqli_report(MYSQLI_REPORT_OFF);
