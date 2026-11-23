@@ -1,0 +1,50 @@
+# Menjalankan OpenSID + MariaDB.
+#   cp docker/.env.example docker/.env   (lalu isi password dan nama image)
+#   docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
+#
+# Buka http://localhost:8080 . Akun awal: admin / sid304 -> WAJIB diganti segera setelah login.
+
+services:
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?isi DB_ROOT_PASSWORD di docker/.env}
+      MARIADB_DATABASE: opensid
+      MARIADB_USER: opensid
+      MARIADB_PASSWORD: ${DB_PASSWORD:?isi DB_PASSWORD di docker/.env}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  web:
+    image: ${OPENSID_IMAGE:?isi OPENSID_IMAGE di docker/.env, mis. ghcr.io/akun-anda/opensid:latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      OPENSID_DB_HOST: db
+      OPENSID_DB_NAME: opensid
+      OPENSID_DB_USER: opensid
+      OPENSID_DB_PASSWORD: ${DB_PASSWORD}
+      # Isi dengan domain Anda (pisahkan koma) untuk membatasi Host header, mis. sid.desa.id
+      OPENSID_TRUSTED_HOSTS: ${OPENSID_TRUSTED_HOSTS:-}
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    volumes:
+      - desa:/var/www/html/desa
+      - backup_inkremental:/var/www/html/backup_inkremental
+
+volumes:
+  db_data:
+  desa:
+  backup_inkremental:

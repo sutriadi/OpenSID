@@ -1,0 +1,11 @@
+.git
+.gitignore
+node_modules
+desa
+backup_inkremental/*
+!backup_inkremental/index.html
+*.log
+.idea
+.vscode
+.DS_Store
+.php-cs-fixer.cache
