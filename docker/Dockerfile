@@ -68,7 +68,7 @@ RUN set -eux; \
     # Gagal lebih awal saat build jika ada ekstensi yang hilang
     php -r 'foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath"] as $e) { if (!extension_loaded($e)) { fwrite(STDERR, "Ekstensi hilang: $e\n"); exit(1); } }'
 
-COPY docker/php.ini /usr/local/etc/php/conf.d/zz-opensid.ini
+COPY docker/opensid.ini /usr/local/etc/php/conf.d/zz-opensid.ini
 COPY docker/apache-opensid.conf /etc/apache2/conf-available/opensid.conf
 COPY docker/init-config.php /usr/local/bin/opensid-init-config.php
 COPY docker/entrypoint.sh /usr/local/bin/opensid-entrypoint
