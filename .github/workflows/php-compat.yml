@@ -1,10 +1,10 @@
-name: Uji kompatibilitas PHP (8.2 / 8.3 / 8.4)
+name: Uji kompatibilitas PHP (8.2 / 8.3 / 8.4) pada image Alpine
 
 on:
   workflow_dispatch:
   push:
     branches: ['ci/**']
-    paths: ['.github/workflows/php-compat.yml', '.github/scripts/**']
+    paths: ['.github/workflows/php-compat.yml', '.github/scripts/**', 'docker/**']
 
 permissions:
   contents: read
@@ -18,8 +18,6 @@ jobs:
       fail-fast: false
       matrix:
         php: ['8.2', '8.3', '8.4']
-    env:
-      COMPOSE: docker compose -f docker/docker-compose.yml --env-file docker/.env
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -38,6 +36,7 @@ jobs:
       - name: Versi PHP aktual dan ekstensi
         run: |
           docker run --rm --entrypoint php opensid:php${{ matrix.php }} -v | head -1
+          docker run --rm --entrypoint php opensid:php${{ matrix.php }} -r 'echo iconv("UTF-8","ASCII//TRANSLIT","Çıkış é"), "\n";'
           docker run --rm --entrypoint php opensid:php${{ matrix.php }} -r 'foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath"] as $e) if (!extension_loaded($e)) { echo "HILANG: $e\n"; exit(1);} echo "ekstensi OK\n";'
 
       - name: Lint kompilasi semua file PHP (deprecation / fatal)
@@ -56,34 +55,8 @@ jobs:
           mkdir -p /tmp/shots && cp /tmp/lib.txt /tmp/shots/lib-php${{ matrix.php }}.txt
           test "${PIPESTATUS[0]}" -eq 0
 
-      - name: Jalankan stack (mode uji, tanpa captcha)
-        run: |
-          set -eu
-          {
-            echo "OPENSID_IMAGE=opensid:php${{ matrix.php }}"
-            echo "DB_ROOT_PASSWORD=$(openssl rand -hex 12)"
-            echo "DB_PASSWORD=$(openssl rand -hex 12)"
-            echo "WEB_PORT=8080"
-          } > docker/.env
-          cat > /tmp/test.override.yml <<'YML'
-          services:
-            web:
-              environment:
-                CI_ENV: testing
-          YML
-          $COMPOSE -f /tmp/test.override.yml up -d
-
-      - name: Tunggu first-run
-        run: |
-          code=000
-          for i in $(seq 1 60); do
-            code=$(curl -s -o /tmp/home.html -w '%{http_code}' -L --max-time 300 http://localhost:8080/ || true)
-            echo "percobaan $i: HTTP $code"; [ "$code" = 200 ] && break; sleep 5
-          done
-          if [ "$code" != 200 ]; then
-            echo "::error title=First-run gagal di PHP ${{ matrix.php }}::HTTP $code"
-            $COMPOSE logs --tail=120 web db; exit 1
-          fi
+      - name: Jalankan stack (hardened; mode uji tanpa captcha)
+        run: .github/scripts/stack-up.sh opensid:php${{ matrix.php }} testing
 
       - name: Crawl menu admin
         run: |
@@ -100,9 +73,14 @@ jobs:
           const b = await chromium.launch();
           const ctx = await b.newContext({ viewport: { width: 1280, height: 800 } });
           const p = await ctx.newPage();
+          const aset = new Map();
+          p.on('response', r => {
+            const u = r.url(), st = r.status();
+            if (u.startsWith(base) && st >= 400 && /\.(js|css|png|jpe?g|gif|svg|ico|woff2?|ttf|json)(\?|$)/i.test(u)) aset.set(st + ' ' + u.replace(base, ''), 1);
+          });
           await p.goto(base + '/siteman', { waitUntil: 'networkidle' });
           await p.fill('input[name=username]', 'admin');
-          await p.fill('#password', 'sid304');
+          await p.fill('#password', process.env.ADMIN_PW);
           await Promise.all([p.waitForNavigation({ waitUntil: 'networkidle' }).catch(() => {}), p.click('button[type=submit]')]);
           console.log('LOGIN ->', p.url());
           await p.goto(base + '/main', { waitUntil: 'networkidle' }).catch(() => {});
@@ -130,6 +108,8 @@ jobs:
           }
           console.log(`== HASIL CRAWL: ${ok} halaman OK, ${hasil.length} bermasalah`);
           hasil.forEach(x => console.log('  BERMASALAH', x));
+          console.log(`== ASET STATIS 4xx/5xx (kemungkinan terblokir aturan Apache): ${aset.size}`);
+          [...aset.keys()].slice(0, 40).forEach(x => console.log('  ', x));
           await b.close();
           JS
           node crawl.mjs 2>&1 | tee /tmp/shots/crawl-php${{ matrix.php }}.txt
@@ -144,7 +124,11 @@ jobs:
           echo "== PHP Warning/Notice/Deprecated (ringkas):"
           grep -oE "PHP (Warning|Notice|Deprecated):  [^/]{0,110}" /tmp/shots/web-php${{ matrix.php }}.log | sort | uniq -c | sort -rn | head -15 || true
           echo "== Log aplikasi (storage/logs):"
-          $COMPOSE exec -T web sh -c 'ls storage/logs; tail -n 40 storage/logs/log-*.php 2>/dev/null | cut -c1-220' || true
+          $COMPOSE exec -T web sh -c 'ls storage/logs; tail -n 40 storage/logs/*.log storage/logs/log-*.php 2>/dev/null | cut -c1-220' || true
+
+      - name: Hentikan stack
+        if: always()
+        run: ${COMPOSE:-true} down -v || true
 
       - uses: actions/upload-artifact@v4
         if: always()

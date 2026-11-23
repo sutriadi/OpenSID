@@ -32,6 +32,15 @@ $t = static function (string $nama, callable $f) use (&$ok, &$gagal) {
     }
 };
 
+$t('iconv //TRANSLIT (musl vs gnu-libiconv)', static function () {
+    $r = iconv('UTF-8', 'ASCII//TRANSLIT', "Kecamatan Çıkış Ñandú é");
+    if ($r === false || str_contains($r, '?')) {
+        throw new RuntimeException('TRANSLIT tidak berfungsi: ' . var_export($r, true));
+    }
+
+    return $r;
+});
+
 $t('FastExcel/OpenSpout: tulis + baca xlsx', static function () {
     $f = sys_get_temp_dir() . '/uji-' . getmypid() . '.xlsx';
     $rows = collect([['nama' => 'Ani', 'umur' => 30], ['nama' => 'Budi', 'umur' => 25]]);

@@ -1,8 +1,15 @@
-# Menjalankan OpenSID + MariaDB.
-#   cp docker/.env.example docker/.env   (lalu isi password dan nama image)
+# OpenSID + MariaDB, dengan pengaturan yang diperketat.
+#
+#   cp docker/.env.example docker/.env      # isi password & nama image
 #   docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
 #
-# Buka http://localhost:8080 . Akun awal: admin / sid304 -> WAJIB diganti segera setelah login.
+# Buka http://127.0.0.1:8080  (login: admin; password dari OPENSID_ADMIN_PASSWORD atau yang dicetak sekali di log:
+#   docker compose -f docker/docker-compose.yml logs web | grep -A4 "Password awal")
+#
+# Port hanya di-bind ke 127.0.0.1. Taruh reverse proxy TLS (Caddy/Traefik/nginx/Cloudflare Tunnel) di depannya;
+# proxy HARUS menimpa X-Forwarded-Proto dan X-Forwarded-For. Ubah WEB_BIND=0.0.0.0 hanya bila sadar risikonya.
+
+name: opensid
 
 services:
   db:
@@ -18,6 +25,8 @@ services:
       - --collation-server=utf8mb4_general_ci
     volumes:
       - db_data:/var/lib/mysql
+    networks: [internal]            # database tidak punya port yang dipublikasikan
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
@@ -36,15 +45,38 @@ services:
       OPENSID_DB_NAME: opensid
       OPENSID_DB_USER: opensid
       OPENSID_DB_PASSWORD: ${DB_PASSWORD}
-      # Isi dengan domain Anda (pisahkan koma) untuk membatasi Host header, mis. sid.desa.id
+      # Password admin awal (hanya dipakai saat pertama kali, selama password admin masih "sid304").
+      # Kosongkan untuk dibuatkan acak dan dicetak sekali di log. 8-20 karakter, ada angka/besar/kecil/simbol.
+      OPENSID_ADMIN_PASSWORD: ${OPENSID_ADMIN_PASSWORD:-}
+      # Domain situs (pisahkan koma) untuk membatasi header Host, mis. sid.desa.id
       OPENSID_TRUSTED_HOSTS: ${OPENSID_TRUSTED_HOSTS:-}
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080"
+    networks: [internal, default]
+    # --- Pengerasan container ---
+    user: "82:82"                    # www-data; image juga sudah USER www-data
+    read_only: true                  # root filesystem hanya-baca; yang bisa ditulis hanya volume & tmpfs di bawah
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    tmpfs:
+      - /tmp:size=256m,mode=1777,uid=82,gid=82
+      - /var/www/html/storage/framework:size=128m,mode=0750,uid=82,gid=82
     volumes:
+      # Wajib: seluruh data desa (konfigurasi DB, unggahan, logo, arsip, tema, template surat, dst.)
       - desa:/var/www/html/desa
+      # Dianjurkan: cadangan inkremental
       - backup_inkremental:/var/www/html/backup_inkremental
+      # Dianjurkan: log aplikasi
+      - logs:/var/www/html/storage/logs
+      # Opsi lain (mount lebih rinci, sesi/cache persisten, dst.): lihat docker/README.md
 
 volumes:
   db_data:
   desa:
   backup_inkremental:
+  logs:
+
+networks:
+  internal:
+    internal: true                  # tanpa akses keluar; web juga terhubung ke jaringan default agar port terpublikasi

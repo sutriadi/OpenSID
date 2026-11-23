@@ -26,7 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      COMPOSE: docker compose -f docker/docker-compose.yml --env-file docker/.env
       MINUTES: ${{ github.event.inputs.minutes || '15' }}
       TUNNEL: ${{ github.event.inputs.tunnel || 'true' }}
     steps:
@@ -43,45 +42,8 @@ jobs:
           tags: opensid:preview
           cache-from: type=gha
 
-      - name: Siapkan .env dan override uji
-        run: |
-          set -eu
-          {
-            echo "OPENSID_IMAGE=opensid:preview"
-            echo "DB_ROOT_PASSWORD=$(openssl rand -hex 12)"
-            echo "DB_PASSWORD=$(openssl rand -hex 12)"
-            echo "WEB_PORT=8080"
-          } > docker/.env
-          # Mode uji: CI_ENV=testing menonaktifkan captcha login agar login otomatis bisa dites
-          cat > /tmp/test.override.yml <<'YML'
-          services:
-            web:
-              environment:
-                CI_ENV: testing
-          YML
-
-      - name: Jalankan stack (mode uji)
-        run: |
-          set -eu
-          $COMPOSE -f /tmp/test.override.yml up -d
-          $COMPOSE ps
-
-      - name: Tunggu first-run (instalasi otomatis)
-        run: |
-          set -u
-          code=000
-          for i in $(seq 1 60); do
-            code=$(curl -s -o /tmp/home.html -w '%{http_code}' -L --max-time 300 http://localhost:8080/ || true)
-            echo "percobaan $i: HTTP $code"
-            [ "$code" = 200 ] && break
-            sleep 5
-          done
-          echo "--- 40 baris pertama respons"; head -c 1500 /tmp/home.html || true; echo
-          if [ "$code" != 200 ]; then
-            echo "::error title=First-run gagal::HTTP $code"
-            $COMPOSE logs --tail=80 web db
-            exit 1
-          fi
+      - name: "Jalankan stack hardened (mode uji, captcha dimatikan) dan tunggu first-run"
+        run: .github/scripts/stack-up.sh opensid:preview testing
 
       - name: Periksa database dan header proxy
         run: |
@@ -93,6 +55,8 @@ jobs:
           $COMPOSE exec -T db mariadb -uopensid -p"$DB_PASSWORD" opensid -e 'SELECT id, username FROM user LIMIT 3' || true
           echo "Folder desa di volume:"
           $COMPOSE exec -T web ls desa desa/config
+          echo "Pemeriksaan keamanan:"
+          .github/scripts/security-checks.sh || echo "::warning title=Pemeriksaan keamanan gagal::lihat log langkah ini"
           echo "Tautan di belakang proxy TLS (harus https://preview.test, tanpa http://preview.test):"
           curl -s -H 'Host: preview.test' -H 'X-Forwarded-Proto: https' http://localhost:8080/ | grep -oE 'https?://preview\.test' | sort | uniq -c
 
@@ -114,7 +78,7 @@ jobs:
           await p.goto(base + '/siteman', { waitUntil: 'networkidle' });
           await p.screenshot({ path: '/tmp/shots/2-login.png' });
           await p.fill('input[name=username]', 'admin');
-          await p.fill('#password', 'sid304');
+          await p.fill('#password', process.env.ADMIN_PW);
           await Promise.all([
             p.waitForNavigation({ waitUntil: 'networkidle', timeout: 60000 }).catch(() => {}),
             p.click('button[type=submit]'),
@@ -131,7 +95,8 @@ jobs:
       - name: Beralih ke mode produksi (captcha aktif)
         run: |
           set -u
-          $COMPOSE up -d
+          # tanpa override CI_ENV=testing -> mode produksi (captcha aktif); container web dibuat ulang
+          docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 60 http://localhost:8080/ || true)
             echo "percobaan $i: HTTP $code"; [ "$code" = 200 ] && break; sleep 3
@@ -156,8 +121,8 @@ jobs:
           curl -fsS -X POST -H "Authorization: Bearer ${{ github.token }}" -H 'Accept: application/vnd.github+json' \
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{\"state\":\"success\",\"context\":\"preview/url\",\"description\":\"Live preview aktif ${MINUTES} menit\",\"target_url\":\"$URL\"}" >/dev/null || echo "gagal menulis status"
-          echo "::notice title=Preview URL::$URL (aktif ${MINUTES} menit; login admin / sid304)"
-          { echo "### Live preview"; echo; echo "$URL"; echo; echo "Aktif ${MINUTES} menit. Akun awal: admin / sid304 (captcha aktif)."; } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Preview URL::$URL (aktif ${MINUTES} menit; login admin / lihat ringkasan job)"
+          { echo "### Live preview"; echo; echo "$URL"; echo; echo "Aktif ${MINUTES} menit. Login: admin / Ci_Test2026+ (captcha aktif; password uji khusus job ini)."; } >> "$GITHUB_STEP_SUMMARY"
           sleep 8
           for i in $(seq 1 10); do
             c=$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 30 "$URL/" || true)

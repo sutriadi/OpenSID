@@ -73,19 +73,73 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Uji cepat (ekstensi PHP, konfigurasi Apache, file sensitif)
+      - name: Uji statis image (versi PHP, ekstensi, Apache, kepemilikan berkas)
         run: |
           set -eux
-          docker run --rm --entrypoint php opensid:smoke -v
+          docker run --rm --entrypoint php opensid:smoke -v | tee /tmp/phpv.txt
+          grep -q '^PHP 8\.4\.' /tmp/phpv.txt
           docker run --rm --entrypoint php opensid:smoke -r '
-            foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath"] as $e) {
+            foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath","opcache","sodium"] as $e) {
               if (!extension_loaded($e)) { fwrite(STDERR, "hilang: $e\n"); exit(1); }
             }
             echo "ekstensi OK\n";'
-          docker run --rm --entrypoint apache2ctl opensid:smoke -t
-          docker run --rm --entrypoint sh opensid:smoke -c 'test -f /var/www/html/vendor/autoload.php && test -f /var/www/html/.htaccess && test ! -e /var/www/html/docker && test ! -e /var/www/html/.git'
+          docker run --rm --entrypoint php opensid:smoke -r 'echo iconv("UTF-8","ASCII//TRANSLIT","Çıkış é"), "\n";'
+          # Image berjalan sebagai www-data secara bawaan
+          test "$(docker run --rm --entrypoint id opensid:smoke -u)" = 82
+          docker run --rm --entrypoint sh opensid:smoke -c 'mkdir -p /tmp/httpd && httpd -t -f /etc/apache2/httpd.conf'
+          docker run --rm --entrypoint sh opensid:smoke -c '
+            cd /var/www/html
+            test -f vendor/autoload.php && test -f .htaccess
+            test ! -e docker && test ! -e .git && test ! -e .github && test ! -e tests && test ! -e node_modules
+            test "$(stat -c %U index.php)" = root
+            test "$(stat -c %U vendor)" = root
+            test "$(stat -c %U donjo-app)" = root
+            test "$(stat -c %U storage/app)" = root
+            test "$(stat -c %U desa)" = www-data
+            test -L favicon.ico'
+          # exec/shell_exec harus nonaktif di PHP
+          docker run --rm --entrypoint php opensid:smoke -r 'exit(function_exists("shell_exec")||function_exists("exec")?1:0);'
           # Tanpa konfigurasi database, entrypoint harus berhenti dengan pesan jelas
-          if docker run --rm opensid:smoke true; then echo "seharusnya gagal"; exit 1; fi
+          if docker run --rm opensid:smoke; then echo "seharusnya gagal tanpa OPENSID_DB_HOST"; exit 1; fi
+          # Perintah lain diteruskan apa adanya
+          docker run --rm opensid:smoke php -v | head -1
+
+      - name: Jalankan stack terkeras (rootfs read-only, cap_drop ALL, produksi)
+        run: .github/scripts/stack-up.sh opensid:smoke production
+
+      - name: Uji keamanan runtime
+        run: .github/scripts/security-checks.sh
+
+      - name: Log container web (untuk bukti)
+        if: always()
+        run: |
+          mkdir -p /tmp/shots
+          $COMPOSE logs --no-color > /tmp/shots/compose.log 2>&1 || true
+          grep -E "\[opensid\]|PHP (Fatal|Parse|Warning)|AH0[0-9]{4}" /tmp/shots/compose.log | grep -v "Password awal\|password:" | head -40 || true
+
+      - name: Hentikan stack
+        if: always()
+        run: ${COMPOSE:-true} down -v || true
+
+      - name: Pindai kerentanan image (Trivy, informasional)
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/shots
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image \
+            --quiet --severity CRITICAL,HIGH --ignore-unfixed --scanners vuln opensid:smoke 2>&1 | tee /tmp/shots/trivy.txt | tail -60
+
+      - name: Audit dependensi Composer (informasional)
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/shots
+          docker run --rm -v "$PWD:/app" -w /app composer:2 audit --locked --no-interaction 2>&1 | tee /tmp/shots/composer-audit.txt | tail -40
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-image-bukti
+          path: /tmp/shots
+          if-no-files-found: ignore
 
       - name: Build & push
         if: github.event_name != 'pull_request'
