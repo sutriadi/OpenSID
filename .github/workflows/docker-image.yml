@@ -79,7 +79,7 @@ jobs:
           docker run --rm --entrypoint php opensid:smoke -v | tee /tmp/phpv.txt
           grep -q '^PHP 8\.4\.' /tmp/phpv.txt
           docker run --rm --entrypoint php opensid:smoke -r '
-            foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath","opcache","sodium"] as $e) {
+            foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath","Zend OPcache","sodium"] as $e) {
               if (!extension_loaded($e)) { fwrite(STDERR, "hilang: $e\n"); exit(1); }
             }
             echo "ekstensi OK\n";'

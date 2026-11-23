@@ -62,7 +62,7 @@ RUN set -eux; \
     test -n "$MOD"; \
     echo "LoadModule php_module ${MOD}" > /etc/apache2/opensid/php-module.conf; \
     # Gagal lebih awal bila ada ekstensi yang hilang
-    php -r 'foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath","opcache"] as $e) { if (!extension_loaded($e)) { fwrite(STDERR, "Ekstensi hilang: $e\n"); exit(1); } }'; \
+    php -r 'foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath","Zend OPcache","sodium"] as $e) { if (!extension_loaded($e)) { fwrite(STDERR, "Ekstensi hilang: $e\n"); exit(1); } }'; \
     php -v | head -1
 
 ENV LD_PRELOAD=/usr/lib/preloadable_libiconv.so
