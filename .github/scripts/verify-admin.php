@@ -7,9 +7,10 @@ $db       = [];
 include '/var/www/html/desa/config/database.php';
 $c = $db['default'];
 mysqli_report(MYSQLI_REPORT_OFF);
-$l = new mysqli($c['hostname'], $c['username'], $c['password'], $c['database'], (int) $c['port']);
-if ($l->connect_errno) {
-    fwrite(STDERR, "DB: {$l->connect_error}\n");
+$l = mysqli_init();
+$l->options(MYSQLI_OPT_CONNECT_TIMEOUT, 5);
+if (! @$l->real_connect($c['hostname'], $c['username'], $c['password'], $c['database'], (int) $c['port'])) {
+    echo "DB: {$l->connect_error} (host={$c['hostname']} user={$c['username']} db={$c['database']} port={$c['port']} panjang_pw=" . strlen((string) $c['password']) . ")\n";
     exit(2);
 }
 $h = $l->query("SELECT password FROM `user` WHERE username='admin' ORDER BY id LIMIT 1")->fetch_row()[0] ?? '';

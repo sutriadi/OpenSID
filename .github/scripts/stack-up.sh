@@ -43,17 +43,21 @@ $COMPOSE ps
 #    supaya tidak ada dua permintaan pertama yang menjalankan seeder bersamaan).
 echo "Menunggu first-run (seeder + rotasi password admin)..."
 ok=0
-for i in $(seq 1 120); do
+for i in $(seq 1 72); do
     if $COMPOSE exec -T -e EXPECT_ADMIN_PASSWORD="$ADMIN_PW" web php < .github/scripts/verify-admin.php > /tmp/verify-admin.txt 2>&1; then
         ok=1
         break
     fi
-    [ $((i % 6)) -eq 0 ] && { echo "  ... belum siap (percobaan $i)"; $COMPOSE ps --format '{{.Service}} {{.Status}}' || true; }
+    if [ $((i % 6)) -eq 1 ] && [ "$i" -le 13 ]; then
+        echo "  ... belum siap (percobaan $i): $(tr '\n' ' ' < /tmp/verify-admin.txt | cut -c1-300)"
+    fi
     sleep 5
 done
 cat /tmp/verify-admin.txt || true
 if [ "$ok" != 1 ]; then
     echo "::error title=First-run gagal::password admin belum diganti / seeder belum selesai"
+    echo "--- desa/config (password disamarkan)"
+    $COMPOSE exec -T web sh -c 'ls -la desa/config; sed -E "s/(password.*= ).*/\1<disamarkan>/" desa/config/database.php; id' || true
     $COMPOSE logs --no-color --tail=150 web db || true
     exit 1
 fi
