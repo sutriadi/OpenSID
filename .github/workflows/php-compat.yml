@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: ['ci/**']
-    paths: ['.github/workflows/php-compat.yml']
+    paths: ['.github/workflows/php-compat.yml', '.github/scripts/**']
 
 permissions:
   contents: read
@@ -39,6 +39,22 @@ jobs:
         run: |
           docker run --rm --entrypoint php opensid:php${{ matrix.php }} -v | head -1
           docker run --rm --entrypoint php opensid:php${{ matrix.php }} -r 'foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath"] as $e) if (!extension_loaded($e)) { echo "HILANG: $e\n"; exit(1);} echo "ekstensi OK\n";'
+
+      - name: Lint kompilasi semua file PHP (deprecation / fatal)
+        run: |
+          docker run --rm -v "$PWD/.github/scripts:/ci:ro" --entrypoint sh opensid:php${{ matrix.php }} /ci/lint-all.sh > /tmp/lint.txt 2>&1 || true
+          mkdir -p /tmp/shots && cp /tmp/lint.txt /tmp/shots/lint-php${{ matrix.php }}.txt
+          echo "== LINT: fatal/parse:"; grep -E "Fatal|Parse error" /tmp/lint.txt || echo "(tidak ada)"
+          echo "== LINT: Deprecated (dikelompokkan):"
+          grep -E "Deprecated" /tmp/lint.txt | sed -E 's/^\[[^]]*\] //; s/ in \/.* on line [0-9]+//' | sort | uniq -c | sort -rn | head -15 || true
+          echo "== LINT: total pesan: $(wc -l < /tmp/lint.txt)"
+          if grep -qE "Fatal|Parse error" /tmp/lint.txt; then echo "::error title=Lint gagal di PHP ${{ matrix.php }}::ada fatal/parse error"; exit 1; fi
+
+      - name: Uji library (xlsx, PDF, gambar, zip, tidy, tanggal)
+        run: |
+          docker run --rm -v "$PWD/.github/scripts:/ci:ro" -e APP_ROOT=/var/www/html -w /var/www/html --entrypoint php opensid:php${{ matrix.php }} /ci/lib-smoke.php 2>&1 | tee /tmp/lib.txt
+          mkdir -p /tmp/shots && cp /tmp/lib.txt /tmp/shots/lib-php${{ matrix.php }}.txt
+          test "${PIPESTATUS[0]}" -eq 0
 
       - name: Jalankan stack (mode uji, tanpa captcha)
         run: |
@@ -104,8 +120,9 @@ jobs:
               const st = r ? r.status() : 0;
               const txt = (await p.locator('body').innerText().catch(() => '')) || '';
               const bad = st >= 500 || ERR.test(txt);
-              if (/info_sistem/.test(u) && !/log|aktivitas/.test(u)) {
-                const baris = txt.split('\n').filter(l => /php/i.test(l)).slice(0, 6);
+              if (/info_sistem/.test(u) && r) {
+                const html = await r.text();
+                const baris = (html.match(/Versi (PHP|Database) terpasang[^<]*/g) || []).map(x => x.trim());
                 console.log('INFO_SISTEM', u, JSON.stringify(baris));
               }
               if (bad) hasil.push(`${st} ${u} :: ${(txt.match(ERR) || [''])[0]}`); else ok++;
