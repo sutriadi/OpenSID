@@ -1,0 +1,137 @@
+name: Uji kompatibilitas PHP (8.2 / 8.3 / 8.4)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ci/**']
+    paths: ['.github/workflows/php-compat.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  uji:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+    env:
+      COMPOSE: docker compose -f docker/docker-compose.yml --env-file docker/.env
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image PHP ${{ matrix.php }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: opensid:php${{ matrix.php }}
+          build-args: PHP_VERSION=${{ matrix.php }}
+          cache-from: type=gha,scope=php${{ matrix.php }}
+          cache-to: type=gha,scope=php${{ matrix.php }},mode=max
+
+      - name: Versi PHP aktual dan ekstensi
+        run: |
+          docker run --rm --entrypoint php opensid:php${{ matrix.php }} -v | head -1
+          docker run --rm --entrypoint php opensid:php${{ matrix.php }} -r 'foreach (["pdo_mysql","curl","fileinfo","gd","iconv","json","mbstring","mysqli","mysqlnd","tidy","zip","exif","intl","bcmath"] as $e) if (!extension_loaded($e)) { echo "HILANG: $e\n"; exit(1);} echo "ekstensi OK\n";'
+
+      - name: Jalankan stack (mode uji, tanpa captcha)
+        run: |
+          set -eu
+          {
+            echo "OPENSID_IMAGE=opensid:php${{ matrix.php }}"
+            echo "DB_ROOT_PASSWORD=$(openssl rand -hex 12)"
+            echo "DB_PASSWORD=$(openssl rand -hex 12)"
+            echo "WEB_PORT=8080"
+          } > docker/.env
+          cat > /tmp/test.override.yml <<'YML'
+          services:
+            web:
+              environment:
+                CI_ENV: testing
+          YML
+          $COMPOSE -f /tmp/test.override.yml up -d
+
+      - name: Tunggu first-run
+        run: |
+          code=000
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /tmp/home.html -w '%{http_code}' -L --max-time 300 http://localhost:8080/ || true)
+            echo "percobaan $i: HTTP $code"; [ "$code" = 200 ] && break; sleep 5
+          done
+          if [ "$code" != 200 ]; then
+            echo "::error title=First-run gagal di PHP ${{ matrix.php }}::HTTP $code"
+            $COMPOSE logs --tail=120 web db; exit 1
+          fi
+
+      - name: Crawl menu admin
+        run: |
+          set -eu
+          mkdir -p /tmp/pw /tmp/shots && cd /tmp/pw
+          npm init -y >/dev/null
+          npm i playwright >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+          cat > crawl.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const base = 'http://localhost:8080';
+          const SKIP = /logout|keluar|hapus|delete|destroy|reset|restore|backup|impor|import|ekspor|export|unduh|download|cetak|sinkron|perbarui|update_|migrasi|install|captcha|\.(zip|pdf|xlsx?|docx?|rtf|csv|sql|jpe?g|png|gif)(\?|$)/i;
+          const ERR = /Fatal error|Uncaught|A PHP Error was encountered|Whoops|Call to undefined|TypeError|ErrorException|Internal Server Error|Server Error|Stack trace|Class .* not found/i;
+          const b = await chromium.launch();
+          const ctx = await b.newContext({ viewport: { width: 1280, height: 800 } });
+          const p = await ctx.newPage();
+          await p.goto(base + '/siteman', { waitUntil: 'networkidle' });
+          await p.fill('input[name=username]', 'admin');
+          await p.fill('#password', 'sid304');
+          await Promise.all([p.waitForNavigation({ waitUntil: 'networkidle' }).catch(() => {}), p.click('button[type=submit]')]);
+          console.log('LOGIN ->', p.url());
+          await p.goto(base + '/main', { waitUntil: 'networkidle' }).catch(() => {});
+          const hrefs = new Set();
+          for (const start of [p.url(), base + '/main', base + '/identitas_desa']) {
+            await p.goto(start, { waitUntil: 'domcontentloaded' }).catch(() => {});
+            for (const h of await p.$$eval('a[href]', as => as.map(a => a.href))) hrefs.add(h.split('#')[0]);
+          }
+          const urls = [...hrefs].filter(u => u.startsWith(base) && !SKIP.test(u)).sort().slice(0, 220);
+          console.log('Jumlah tautan yang dikunjungi:', urls.length);
+          const hasil = []; let ok = 0;
+          for (const u of urls) {
+            try {
+              const r = await p.goto(u, { waitUntil: 'domcontentloaded', timeout: 45000 });
+              const st = r ? r.status() : 0;
+              const txt = (await p.locator('body').innerText().catch(() => '')) || '';
+              const bad = st >= 500 || ERR.test(txt);
+              if (/info_sistem/.test(u) && !/log|aktivitas/.test(u)) {
+                const baris = txt.split('\n').filter(l => /php/i.test(l)).slice(0, 6);
+                console.log('INFO_SISTEM', u, JSON.stringify(baris));
+              }
+              if (bad) hasil.push(`${st} ${u} :: ${(txt.match(ERR) || [''])[0]}`); else ok++;
+            } catch (e) { hasil.push(`ERR ${u} :: ${String(e).slice(0, 100)}`); }
+          }
+          console.log(`== HASIL CRAWL: ${ok} halaman OK, ${hasil.length} bermasalah`);
+          hasil.forEach(x => console.log('  BERMASALAH', x));
+          await b.close();
+          JS
+          node crawl.mjs 2>&1 | tee /tmp/shots/crawl-php${{ matrix.php }}.txt
+
+      - name: Error PHP di log container dan log aplikasi
+        if: always()
+        run: |
+          mkdir -p /tmp/shots
+          $COMPOSE logs --no-color web > /tmp/shots/web-php${{ matrix.php }}.log 2>&1 || true
+          echo "== PHP Fatal/Parse/Uncaught di log Apache/PHP:"
+          grep -E "PHP (Fatal|Parse)|Uncaught|Stack trace" /tmp/shots/web-php${{ matrix.php }}.log | sort | uniq -c | sort -rn | head -20 || true
+          echo "== PHP Warning/Notice/Deprecated (ringkas):"
+          grep -oE "PHP (Warning|Notice|Deprecated):  [^/]{0,110}" /tmp/shots/web-php${{ matrix.php }}.log | sort | uniq -c | sort -rn | head -15 || true
+          echo "== Log aplikasi (storage/logs):"
+          $COMPOSE exec -T web sh -c 'ls storage/logs; tail -n 40 storage/logs/log-*.php 2>/dev/null | cut -c1-220' || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compat-php${{ matrix.php }}
+          path: /tmp/shots
+          if-no-files-found: ignore
