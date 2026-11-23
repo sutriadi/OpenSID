@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: opensid-preview
@@ -92,8 +93,8 @@ jobs:
           $COMPOSE exec -T db mariadb -uopensid -p"$DB_PASSWORD" opensid -e 'SELECT id, username FROM user LIMIT 3' || true
           echo "Folder desa di volume:"
           $COMPOSE exec -T web ls desa desa/config
-          echo "Redirect di belakang proxy TLS (harus berawalan https://preview.test):"
-          curl -s -o /dev/null -D - -H 'Host: preview.test' -H 'X-Forwarded-Proto: https' http://localhost:8080/ | grep -i '^location' || echo "(tanpa redirect)"
+          echo "Tautan di belakang proxy TLS (harus https://preview.test, tanpa http://preview.test):"
+          curl -s -H 'Host: preview.test' -H 'X-Forwarded-Proto: https' http://localhost:8080/ | grep -oE 'https?://preview\.test' | sort | uniq -c
 
       - name: Uji browser (beranda + login admin) dengan Playwright
         run: |
@@ -151,6 +152,10 @@ jobs:
           done
           if [ -z "$URL" ]; then echo "::error title=Tunnel gagal::URL tidak muncul"; cat /tmp/cf.log; exit 1; fi
           echo "$URL" > /tmp/preview_url
+          # Status commit dibaca langsung dari API/UI selama job berjalan
+          curl -fsS -X POST -H "Authorization: Bearer ${{ github.token }}" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{\"state\":\"success\",\"context\":\"preview/url\",\"description\":\"Live preview aktif ${MINUTES} menit\",\"target_url\":\"$URL\"}" >/dev/null || echo "gagal menulis status"
           echo "::notice title=Preview URL::$URL (aktif ${MINUTES} menit; login admin / sid304)"
           { echo "### Live preview"; echo; echo "$URL"; echo; echo "Aktif ${MINUTES} menit. Akun awal: admin / sid304 (captcha aktif)."; } >> "$GITHUB_STEP_SUMMARY"
           sleep 8
@@ -158,6 +163,28 @@ jobs:
             c=$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 30 "$URL/" || true)
             echo "tunnel dicek dari runner: HTTP $c"; [ "$c" = 200 ] && break; sleep 4
           done
+          # Uji dari sisi pengunjung lewat TLS tunnel: cari mixed content / request gagal
+          cd /tmp/pw
+          cat > tunnel.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const base = process.env.BASE;
+          const b = await chromium.launch();
+          const p = await b.newPage({ viewport: { width: 1280, height: 800 } });
+          const gagal = [], konsol = [];
+          p.on('requestfailed', r => gagal.push(r.url() + ' ' + (r.failure()?.errorText || '')));
+          p.on('response', r => { if (r.status() >= 400) gagal.push(r.status() + ' ' + r.url()); });
+          p.on('console', m => { if (/mixed content|blocked/i.test(m.text())) konsol.push(m.text()); });
+          for (const [nama, path] of [['beranda', '/'], ['login', '/siteman']]) {
+            await p.goto(base + path, { waitUntil: 'networkidle', timeout: 90000 });
+            await p.screenshot({ path: `/tmp/shots/tunnel-${nama}.png`, fullPage: true });
+            console.log(nama, p.url(), '|', await p.title());
+          }
+          console.log('Request gagal/4xx/5xx:', gagal.length); gagal.slice(0, 15).forEach(x => console.log('  ', x));
+          console.log('Mixed content:', konsol.length); konsol.slice(0, 5).forEach(x => console.log('  ', x));
+          await b.close();
+          JS
+          BASE="$URL" node tunnel.mjs || echo "uji tunnel gagal (tidak menghentikan preview)"
+          cd - >/dev/null
           END=$(( $(date +%s) + MINUTES * 60 ))
           while [ "$(date +%s)" -lt "$END" ]; do sleep 30; done
           echo "Waktu preview habis."
