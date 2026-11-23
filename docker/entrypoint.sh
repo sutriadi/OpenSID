@@ -46,8 +46,10 @@ done
 rm -rf /tmp/httpd
 mkdir -p /tmp/httpd
 mkfifo /tmp/httpd/error.log /tmp/httpd/access.log
-cat /tmp/httpd/error.log  >&2 &
-cat /tmp/httpd/access.log     &
+# `<>` membuka FIFO baca-tulis: pembaca tidak pernah menerima EOF saat Apache menutup/membuka ulang log
+# (mis. pada restart/graceful), dan Apache tidak pernah terblokir menunggu pembaca.
+cat <> /tmp/httpd/error.log  >&2 &
+cat <> /tmp/httpd/access.log     &
 
 # --- Konfigurasi aplikasi dari environment ------------------------------------------------------------------
 mkdir -p desa/config
