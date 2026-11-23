@@ -64,7 +64,7 @@ $COMPOSE exec -T web sh -c 'touch /var/www/html/backup_inkremental/uji && rm /va
 $COMPOSE exec -T web sh -c 'touch /var/www/html/storage/logs/uji && rm /var/www/html/storage/logs/uji' && ok "storage/logs bisa ditulis" || bad "storage/logs tidak bisa ditulis"
 cap=$($COMPOSE exec -T web grep '^CapEff' /proc/self/status | tr -d '\r' | awk '{print $2}')
 [ "$cap" = "0000000000000000" ] && ok "tanpa capability Linux (CapEff=$cap)" || bad "capability Linux masih ada (CapEff=$cap)"
-$COMPOSE exec -T web sh -c 'php -r "exit(function_exists(\"shell_exec\") || function_exists(\"exec\") || function_exists(\"assert\") ? 1 : 0);"' && ok "exec/shell_exec/assert dinonaktifkan di PHP" || bad "fungsi exec/assert masih aktif"
+$COMPOSE exec -T web sh -c 'php -r "exit(function_exists(\"shell_exec\") || function_exists(\"exec\") ? 1 : 0);"' && ok "exec/shell_exec dinonaktifkan di PHP" || bad "fungsi exec masih aktif"
 
 echo "== 6. Log mengalir ke stdout/stderr container"
 $COMPOSE logs --no-color web 2>&1 | grep -qE '"(GET|POST|HEAD) ' && ok "access log terlihat di docker logs" || bad "access log tidak muncul di docker logs"

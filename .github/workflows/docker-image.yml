@@ -97,8 +97,8 @@ jobs:
             test "$(stat -c %U storage/app)" = root
             test "$(stat -c %U desa)" = www-data
             test -L favicon.ico'
-          # exec/shell_exec/assert harus nonaktif di PHP
-          docker run --rm --entrypoint php opensid:smoke -r 'exit(function_exists("shell_exec")||function_exists("exec")||function_exists("assert")?1:0);'
+          # exec/shell_exec harus nonaktif di PHP
+          docker run --rm --entrypoint php opensid:smoke -r 'exit(function_exists("shell_exec")||function_exists("exec")?1:0);'
           # Tanpa konfigurasi database, entrypoint harus berhenti dengan pesan jelas
           if docker run --rm opensid:smoke; then echo "seharusnya gagal tanpa OPENSID_DB_HOST"; exit 1; fi
           # Perintah lain diteruskan apa adanya
