@@ -69,4 +69,11 @@ $COMPOSE exec -T web sh -c 'php -r "exit(function_exists(\"shell_exec\") || func
 echo "== 6. Log mengalir ke stdout/stderr container"
 $COMPOSE logs --no-color web 2>&1 | grep -qE '"(GET|POST|HEAD) ' && ok "access log terlihat di docker logs" || bad "access log tidak muncul di docker logs"
 
+echo "== 7. Titik masuk sah tetap bekerja"
+for p in / /index.php /robots.txt /siteman /rfm/dialog.php; do
+    c=$(code -L "$BASE$p")
+    case "$c" in 200|401) ok "$p -> $c" ;; *) bad "$p -> $c (seharusnya 200/401)" ;; esac
+done
+c=$(code "$BASE/rfm/execute.php"); case "$c" in 403|404) bad "/rfm/execute.php diblokir ($c)" ;; *) ok "/rfm/execute.php dapat dijangkau ($c)" ;; esac
+
 exit $fail
