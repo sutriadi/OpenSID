@@ -103,12 +103,21 @@ jobs:
           if docker run --rm opensid:smoke; then echo "seharusnya gagal tanpa OPENSID_DB_HOST"; exit 1; fi
           # Perintah lain diteruskan apa adanya
           docker run --rm opensid:smoke php -v | head -1
+          # opensid-scan (pemindai forensik bawaan image) harus berjalan tanpa error pada image bersih
+          docker run --rm --entrypoint opensid-scan opensid:smoke | tee /tmp/scan-fresh.txt
+          grep -q "SELESAI" /tmp/scan-fresh.txt
 
       - name: Jalankan stack terkeras (rootfs read-only, cap_drop ALL, produksi)
         run: .github/scripts/stack-up.sh opensid:smoke production
 
       - name: Uji keamanan runtime
         run: .github/scripts/security-checks.sh
+
+      - name: opensid-scan di stack yang sedang berjalan (cara pakai sebenarnya)
+        run: |
+          mkdir -p /tmp/shots
+          $COMPOSE exec -T web opensid-scan | tee /tmp/shots/opensid-scan.txt
+          grep -q "SELESAI" /tmp/shots/opensid-scan.txt
 
       - name: Log container web (untuk bukti)
         if: always()

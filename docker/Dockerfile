@@ -41,12 +41,14 @@ FROM alpine:${ALPINE_VERSION}
 ARG PHP_VERSION=8.4
 
 # gnu-libiconv: iconv bawaan musl tidak mendukung //TRANSLIT yang dipakai banyak library (slug, dsb.)
+# procps+iproute2: dipakai opensid-scan (lihat di bawah) untuk melihat proses (ps aux) dan koneksi
+# jaringan (ss) saat memeriksa tanda-tanda kompromi -- busybox bawaan Alpine tidak cukup untuk itu.
 RUN set -eux; \
     MM="$(echo "${PHP_VERSION}" | tr -d .)"; \
     addgroup -g 82 -S www-data 2>/dev/null || true; \
     adduser -u 82 -D -S -G www-data -h /var/www www-data 2>/dev/null || true; \
     apk add --no-cache \
-        apache2 curl gnu-libiconv su-exec tini tzdata \
+        apache2 curl gnu-libiconv su-exec tini tzdata procps iproute2 \
         "php${MM}" "php${MM}-apache2" \
         "php${MM}-bcmath" "php${MM}-ctype" "php${MM}-curl" "php${MM}-dom" "php${MM}-exif" \
         "php${MM}-fileinfo" "php${MM}-gd" "php${MM}-iconv" "php${MM}-intl" "php${MM}-mbstring" \
@@ -73,8 +75,9 @@ COPY docker/php/opensid-security.ini  /etc/php/conf.d/zz-opensid-security.ini
 COPY docker/init-config.php           /usr/local/bin/opensid-init-config.php
 COPY docker/firstrun.php              /usr/local/bin/opensid-firstrun.php
 COPY docker/entrypoint.sh             /usr/local/bin/opensid-entrypoint
+COPY docker/scan.sh                   /usr/local/bin/opensid-scan
 RUN set -eux; \
-    chmod 0755 /usr/local/bin/opensid-entrypoint; \
+    chmod 0755 /usr/local/bin/opensid-entrypoint /usr/local/bin/opensid-scan; \
     test -f /etc/apache2/mime.types
 
 WORKDIR /var/www/html

@@ -114,6 +114,25 @@ Yang **menjadi tanggung jawab Anda** / keterbatasan yang diketahui:
 - Cadangkan `desa/` **dan** database bersamaan (termasuk `desa/app_key`). Perbarui image secara berkala (build mingguan otomatis menarik patch Alpine); `vendor/` ikut upstream, periksa `composer audit` di artefak CI.
 - Bila `OPENSID_TRUSTED_HOSTS` kosong, header `Host` tidak divalidasi.
 
+## Pemindai forensik bawaan (`opensid-scan`)
+
+Image ini menyertakan skrip pemindai **read-only** (tidak mengunggah/mengeksekusi/mengubah apa pun) untuk memeriksa tanda
+kompromi: berkas `.php`/`.htaccess` di folder data, pola kode webshell, izin berkas yang longgar, berkas yang baru diubah,
+cron mencurigakan, proses & koneksi jaringan yang berjalan, serta fungsi PHP berbahaya yang masih aktif.
+
+```bash
+docker compose -f docker/docker-compose.yml exec web opensid-scan | tee laporan.txt
+# atau dengan podman:
+podman exec -it <nama_container> opensid-scan | tee laporan.txt
+
+# ikut memeriksa tabel `user` (cari akun admin siluman):
+docker compose -f docker/docker-compose.yml exec -e DB_HOST=db -e DB_USER=opensid -e DB_PASS=... -e DB_NAME=opensid \
+  web opensid-scan | tee laporan.txt
+```
+
+Baris berawalan `!!` di keluarannya adalah temuan yang paling perlu diperiksa dulu. Ini bukan pengganti audit keamanan
+menyeluruh, hanya pemeriksaan cepat yang bisa dijalankan kapan saja tanpa alat tambahan.
+
 ## Membangun sendiri
 
 ```bash
