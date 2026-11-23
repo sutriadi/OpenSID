@@ -33,7 +33,10 @@ sect() { echo; echo "## $*"; echo "---------------------------------------------
 sect "1. Berkas PHP/eksekusi di folder yang SEHARUSNYA cuma data (paling umum berisi webshell)"
 # Folder ini seharusnya tidak pernah berisi .php/.phtml/.phar/.cgi dst. Lihat donjo-app/config/installer.php
 # dan docker/apache/httpd.conf untuk daftar resmi folder data OpenSID.
-DATA_DIRS="desa/upload desa/arsip desa/logo desa/pengaturan desa/anjungan desa/widgets desa/cache desa/themes desa/template-surat assets storage/app backup_inkremental"
+# Catatan: "assets/" dan "storage/app/" TIDAK dimasukkan -- keduanya bagian sah dari kode OpenSID
+# yang memang berisi .php (mis. assets/fonts/*.php dari TCPDF, storage/app/template/.../view.php
+# untuk template surat). Memasukkannya di sini hanya menghasilkan alarm palsu.
+DATA_DIRS="desa/upload desa/arsip desa/logo desa/pengaturan desa/anjungan desa/widgets desa/cache desa/themes desa/template-surat backup_inkremental"
 found=0
 for d in $DATA_DIRS; do
     [ -d "$d" ] || continue
@@ -92,6 +95,10 @@ echo "(berkas di atas bisa ditulis SIAPA SAJA di sistem -- seharusnya kosong/san
 
 # -----------------------------------------------------------------------------------
 sect "5. Berkas yang diubah paling baru (fokus ke luar folder data normal -- indikasi backdoor baru)"
+echo "(Catatan: tepat setelah image baru dibangun/di-deploy, SEMUA berkas kode wajar muncul di sini --"
+echo " tanggalnya adalah waktu build, bukan tanda apa pun. Bagian ini baru berarti setelah container"
+echo " berjalan >14 hari tanpa pembaruan image: kode seharusnya sudah tidak berubah sama sekali karena"
+echo " rootfs hanya-baca -- berkas kode yang muncul di sini pada kondisi itu patut dicurigai.)"
 find . -xdev -type f -mtime -14 2>/dev/null \
   | grep -vE '^\./(storage/(logs|framework)|backup_inkremental|desa/(cache|upload|arsip|logo|pengaturan|anjungan|widgets|themes|template-surat))/' \
   | grep -vE '^\./\.git/' \
