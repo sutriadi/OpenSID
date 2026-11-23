@@ -1,4 +1,4 @@
-name: Preview (uji first-run + live preview)
+name: Preview (uji first-run + live preview, image Alpine)
 
 on:
   workflow_dispatch:
