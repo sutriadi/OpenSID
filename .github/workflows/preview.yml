@@ -167,3 +167,4 @@ jobs:
           name: preview-bukti
           path: /tmp/shots
           if-no-files-found: ignore
+          retention-days: 7

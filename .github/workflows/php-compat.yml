@@ -136,3 +136,4 @@ jobs:
           name: compat-php${{ matrix.php }}
           path: /tmp/shots
           if-no-files-found: ignore
+          retention-days: 7

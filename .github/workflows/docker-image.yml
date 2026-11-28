@@ -149,6 +149,7 @@ jobs:
           name: docker-image-bukti
           path: /tmp/shots
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build & push
         if: github.event_name != 'pull_request'
